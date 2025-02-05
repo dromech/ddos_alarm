@@ -4,18 +4,7 @@ The DoS Alarm System is a Python-based network monitoring tool that detects pote
 Warning:
 This tool is intended for educational purposes and authorized network monitoring only. Ensure you have proper permission before running this tool on any network.
 
-Table of Contents
-Features
-Requirements
-Installation
-Usage
-Configuration
-Performance Metrics
-Code Overview
-Disclaimer
-Features
-Real-Time Packet Monitoring:
-Sniffs network packets on a user-selected interface.
+alarm.py:
 
 Threshold-Based Detection:
 Raises alerts if the number of SYN or UDP packets within a time window exceeds defined thresholds.
@@ -29,36 +18,14 @@ Logs metrics such as true positives, false positives, false negatives, and detec
 User-Friendly Interface Selection:
 Displays available network interfaces with friendly names and allows the user to select one.
 
-Requirements
-Python 3.6+
-Scapy
-psutil
-scikit-learn
-numpy
-You can install the required packages using pip:
-
-bash
-Copy
-pip install scapy psutil scikit-learn numpy
-Installation
-Clone the Repository:
-
-bash
-Copy
-git clone https://github.com/dromech/ddos_alarm.git
-cd ddos_alarm
 Install Dependencies:
 
-bash
-Copy
 pip install -r requirements.txt
-If you don't have a requirements.txt, you can install the dependencies manually as shown in the Requirements section.
 
-Usage
+Usage:
+
 Run the Script:
 
-bash
-Copy
 python dos_alarm_system.py
 Select a Network Interface:
 Upon starting, the tool will list all available network interfaces with friendly names. Input the number corresponding to the interface you wish to monitor.
