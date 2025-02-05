@@ -1,0 +1,33 @@
+DoS Alarm System Performance Metrics
+====================================
+
+Timestamp: 2025-01-23 16:33:56
+True Positives (Window): 0
+False Positives (Window): 0
+False Negatives (Window): 0
+Average Detection Time (Window): 0.00 seconds
+-----
+Timestamp: 2025-01-23 16:34:27
+True Positives (Window): 0
+False Positives (Window): 0
+False Negatives (Window): 0
+Average Detection Time (Window): 0.00 seconds
+-----
+Timestamp: 2025-01-23 16:34:37
+True Positives (Window): 40
+False Positives (Window): 0
+False Negatives (Window): 0
+Average Detection Time (Window): 0.00 seconds
+-----
+Timestamp: 2025-01-23 16:34:47
+True Positives (Window): 79
+False Positives (Window): 0
+False Negatives (Window): 0
+Average Detection Time (Window): 0.00 seconds
+-----
+Timestamp: 2025-01-23 16:35:21
+True Positives (Window): 120
+False Positives (Window): 0
+False Negatives (Window): 0
+Average Detection Time (Window): 0.00 seconds
+-----
