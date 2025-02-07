@@ -2,12 +2,46 @@ import psutil
 from scapy.all import sniff, TCP, UDP, get_if_list
 from collections import defaultdict
 import time
-# import smtplib
-# from email.mime.text import MIMEText
 from sklearn.cluster import KMeans
 import numpy as np
 import sys
 import threading
+
+# TO DO ---------------------------------------------------
+"""
+- Add modular switching functionality to select between detection methods.
+    - Create a configuration option or command-line argument to choose between:
+        - Threshold-based detection.
+        - Anomaly detection.
+    - Encapsulate each detection method in its own function or class.
+
+- Enhance anomaly detection:
+    - Tune KMeans parameters (e.g., number of clusters, initialization settings).
+    - Implement an additional anomaly detection model (such as an autoencoder).
+    - Expand feature extraction to include additional traffic characteristics (e.g., packet sizes, inter-arrival times).
+
+- Improve performance metric logging:
+    - Log additional details such as CPU and memory usage during detection.
+    - Record detailed timestamps for alerts.
+    - Accurately log counts of false positives and false negatives.
+    - Refine metric reset logic for each time window.
+
+- Upgrade alerting mechanisms:
+    - Integrate email notifications (maybe using SMTP).
+    - Implement SMS or other messaging service alerts.
+    - Add rate-limiting to avoid alert flooding during prolonged attacks.
+
+- Develop a simulation module for DoS attacks:
+    - Implement simulations for TCP SYN Flood, UDP Flood, and Slowloris attacks. (have basic SYN Flood and UDP Flood) (may need improvment)
+    - Allow configuration of simulation parameters to test detection methods under various conditions.
+    - Automate attack simulations to generate comprehensive performance data.
+
+- Update documentation:
+    - Document all new functions and classes.
+    - Update the README with installation instructions, usage guidelines, and configuration options.
+    - Prepare a final report detailing the comparative analysis of detection methods and performance metrics.
+"""
+# TO DO ---------------------------------------------------
 
 # Configuration
 THRESHOLD_SYN = 100  # SYN packets per window to trigger alert
