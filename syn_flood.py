@@ -3,6 +3,8 @@ import random
 import time
 import sys
 
+# Liam Calder
+
 # Read target IPs from a file (one per line)
 with open('targets.txt', 'r') as f:
     target_ips = [line.strip() for line in f if line.strip()]
