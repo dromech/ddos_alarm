@@ -7,6 +7,8 @@ import numpy as np
 import sys
 import threading
 
+# Liam Calder
+
 # TO DO ---------------------------------------------------
 """
 - Add modular switching functionality to select between detection methods.
