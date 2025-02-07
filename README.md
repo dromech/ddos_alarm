@@ -1,9 +1,9 @@
 Created by Liam Calder
 
-DoS Alarm System:
+DoS Alarm System:  
 The DoS Alarm System is a Python-based network monitoring tool designed to detect potential Denial-of-Service (DoS) attacks by monitoring network traffic for abnormal SYN and UDP packet rates. The tool also leverages anomaly detection with K-Means clustering to identify unusual traffic patterns.
 
-Warning:
+Warning:  
 This tool is intended for educational purposes and authorized network monitoring only. Ensure you have proper permission before running this tool on any network.
 
 Current Features:  
