@@ -34,7 +34,7 @@ import threading
     - Add rate-limiting to avoid alert flooding during prolonged attacks.
 
 - Develop a simulation module for DoS attacks:
-    - Implement simulations for TCP SYN Flood, UDP Flood, and Slowloris attacks. (have basic SYN Flood and UDP Flood) (may need improvment)
+    - Implement simulations for TCP SYN Flood, UDP Flood, and maybe Slowloris attacks. (have basic SYN Flood and UDP Flood) (may need improvment)
     - Allow configuration of simulation parameters to test detection methods under various conditions.
     - Automate attack simulations to generate comprehensive performance data.
 
