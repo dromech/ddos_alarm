@@ -69,7 +69,7 @@ Usage
 Run the script:  
 bash  
 Copy  
-python dos_alarm_system.py  
+python alarm.py  
 
 Select a Network Interface:  
 Upon starting, the tool will list all available network interfaces with friendly names. Input the number corresponding to the interface you wish to monitor.
