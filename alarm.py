@@ -11,11 +11,11 @@ import threading
 
 # TO DO ---------------------------------------------------
 """
-- Add modular switching functionality to select between detection methods.
-    - Create a configuration option or command-line argument to choose between:
+- Add modular switching functionality to select between detection methods. (done)
+    - Create a configuration option or command-line argument to choose between: (done)
         - Threshold-based detection.
         - Anomaly detection.
-    - Encapsulate each detection method in its own function or class.
+    - Encapsulate each detection method in its own function or class. (done so far)
 
 - Enhance anomaly detection:
     - Tune KMeans parameters (e.g., number of clusters, initialization settings).
@@ -24,7 +24,7 @@ import threading
 
 - Improve performance metric logging:
     - Log additional details such as CPU and memory usage during detection.
-    - Record detailed timestamps for alerts.
+    - Record detailed timestamps for alerts. (done)
     - Accurately log counts of false positives and false negatives.
     - Refine metric reset logic for each time window.
 
@@ -40,7 +40,7 @@ import threading
 
 - Update documentation:
     - Document all new functions and classes.
-    - Update the README with installation instructions, usage guidelines, and configuration options.
+    - Update the README with installation instructions, usage guidelines, and configuration options. (done)
     - Prepare a final report detailing the comparative analysis of detection methods and performance metrics.
 """
 # TO DO ---------------------------------------------------
