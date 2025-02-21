@@ -1,5 +1,5 @@
 import psutil
-from scapy.all import sniff, TCP, UDP, get_if_list
+from scapy.all import sniff, TCP, UDP, IP, get_if_list
 from collections import defaultdict
 import time
 from sklearn.cluster import KMeans
@@ -66,11 +66,21 @@ metrics_total = {
     'true_positives': 0,
     'false_positives': 0,
     'false_negatives': 0,
-    'detection_times': []
+    'detection_times': [],
+    'window_pps': [],
+    'attack_durations': [],
+    'attack_pps': [],  
+    'attack_sources': []
 }
 
 # Flag to control sniffing
 stop_sniffing = False
+window_start_time = time.time()
+
+# Global variables for enhanced threshold attack tracking
+# Separate state for SYN and UDP floods
+attack_state_syn = {"active": False, "start_time": None, "sources": set()}
+attack_state_udp = {"active": False, "start_time": None, "sources": set()}
 
 def send_alert(subject, body):
     """Print alert to console."""
@@ -84,93 +94,74 @@ def log_metrics():
         f.write(f"False Positives (Window): {metrics_total['false_positives']}\n")
         f.write(f"False Negatives (Window): {metrics_total['false_negatives']}\n")
         if metrics_total['detection_times']:
-            average_detection_time = sum(metrics_total['detection_times']) / len(metrics_total['detection_times'])
+            avg_time = sum(metrics_total['detection_times']) / len(metrics_total['detection_times'])
         else:
-            average_detection_time = 0
-        f.write(f"Average Detection Time (Window): {average_detection_time:.2f} seconds\n")
+            avg_time = 0
+        f.write(f"Average Detection Time (Window): {avg_time:.2f} seconds\n")
         f.write("-----\n")
-    # Note: Do not reset metrics_total to keep cumulative counts
 
-def detect_anomaly(features):
-    """Detect anomalies using K-Means clustering."""
-    if len(features) < 2:
+# --- Detector Classes ---
+
+class ThresholdDetector:
+    """Handles threshold-based detection by counting packets."""
+    def __init__(self, syn_threshold, udp_threshold):
+        self.syn_threshold = syn_threshold
+        self.udp_threshold = udp_threshold
+        self.packet_counts = defaultdict(int)
+        self.source_ips = set()  # Collect source IP addresses
+    
+    def update(self, packet):
+        if packet.haslayer(IP):
+            self.source_ips.add(packet[IP].src)
+        if packet.haslayer(TCP):
+            tcp_layer = packet.getlayer(TCP)
+            if tcp_layer.flags == 'S':  # SYN flag
+                self.packet_counts['SYN'] += 1
+        if packet.haslayer(UDP):
+            self.packet_counts['UDP'] += 1
+    
+    def detect(self):
+        alerts = []
+        if self.packet_counts['SYN'] > self.syn_threshold:
+            alerts.append(f"High SYN packet rate: {self.packet_counts['SYN']} packets in {WINDOW_SIZE} seconds")
+        if self.packet_counts['UDP'] > self.udp_threshold:
+            alerts.append(f"High UDP packet rate: {self.packet_counts['UDP']} packets in {WINDOW_SIZE} seconds")
+        return alerts
+    
+    def reset(self):
+        self.packet_counts.clear()
+        self.source_ips.clear()
+
+class AnomalyDetector:
+    """Handles anomaly detection using KMeans clustering on traffic history."""
+    def __init__(self, anomaly_threshold):
+        self.anomaly_threshold = anomaly_threshold
+        self.history = []  # Each element is [SYN_count, UDP_count]
+    
+    def update(self, current_counts):
+        self.history.append([current_counts.get('SYN', 0), current_counts.get('UDP', 0)])
+    
+    def detect(self):
+        if len(self.history) < 2:
+            return False
+        try:
+            kmeans = KMeans(n_clusters=2, random_state=0)
+            features = np.array(self.history)
+            kmeans.fit(features)
+            labels = kmeans.labels_
+            counts = np.bincount(labels)
+            dominant_cluster = np.argmax(counts)
+            minority_cluster = 1 - dominant_cluster
+            if counts[minority_cluster] / counts[dominant_cluster] < self.anomaly_threshold:
+                return True
+        except Exception as e:
+            print(f"Anomaly detection error: {e}")
         return False
-    try:
-        kmeans = KMeans(n_clusters=2, random_state=0)
-        kmeans.fit(features)
-        labels = kmeans.labels_
-        counts = np.bincount(labels)
-        dominant_cluster = np.argmax(counts)
-        minority_cluster = 1 - dominant_cluster
-        # If minority cluster is significantly smaller, consider it as anomaly
-        if counts[minority_cluster] / counts[dominant_cluster] < ANOMALY_THRESHOLD:
-            return True
-        return False
-    except Exception as e:
-        print(f"Anomaly detection error: {e}")
-        return False
+    
+    def reset(self):
+        self.history = []
 
-def process_packet(packet):
-    """Process each captured packet."""
-    global start_time
-
-    current_time = time.time()
-    elapsed_time = current_time - start_time
-
-    # Reset per-window packet counts and history if window has passed
-    if elapsed_time > WINDOW_SIZE:
-        packet_counts.clear()
-        start_time = current_time
-        traffic_history.clear()
-        log_metrics()
-
-    # Count SYN packets
-    if packet.haslayer(TCP):
-        tcp_layer = packet.getlayer(TCP)
-        if tcp_layer.flags == 'S':  # SYN flag
-            packet_counts['SYN'] += 1
-            print(f"[{time.strftime('%H:%M:%S')}] SYN packet detected. Count: {packet_counts['SYN']}")
-
-    # Count UDP packets
-    if packet.haslayer(UDP):
-        packet_counts['UDP'] += 1
-        print(f"[{time.strftime('%H:%M:%S')}] UDP packet detected. Count: {packet_counts['UDP']}")
-
-    # Collect features for anomaly detection
-    traffic_history.append([packet_counts['SYN'], packet_counts['UDP']])
-
-    # Threshold-Based Detection
-    if elapsed_time <= WINDOW_SIZE:
-        detection_start_time = time.time()
-        if packet_counts['SYN'] > THRESHOLD_SYN:
-            subject = "DoS Alert: High SYN Packet Rate"
-            body = f"Detected {packet_counts['SYN']} SYN packets in the last {WINDOW_SIZE} seconds."
-            send_alert(subject, body)
-            metrics_total['true_positives'] += 1  # Cumulative count
-            packet_counts['SYN'] = 0  # Reset after alert
-            detection_time = time.time() - detection_start_time
-            metrics_total['detection_times'].append(detection_time)
-
-        if packet_counts['UDP'] > THRESHOLD_UDP:
-            subject = "DoS Alert: High UDP Packet Rate"
-            body = f"Detected {packet_counts['UDP']} UDP packets in the last {WINDOW_SIZE} seconds."
-            send_alert(subject, body)
-            metrics_total['true_positives'] += 1  # Cumulative count
-            packet_counts['UDP'] = 0  # Reset after alert
-            detection_time = time.time() - detection_start_time
-            metrics_total['detection_times'].append(detection_time)
-
-    # Anomaly Detection every window
-    if elapsed_time > WINDOW_SIZE and len(traffic_history) > 0:
-        is_anomaly = detect_anomaly(traffic_history)
-        if is_anomaly:
-            subject = "DoS Alert: Anomalous Traffic Pattern Detected"
-            body = f"Anomalous traffic pattern detected based on historical data in the last {WINDOW_SIZE} seconds."
-            send_alert(subject, body)
-            metrics_total['true_positives'] += 1  # Cumulative count
-            detection_time = time.time() - detection_start_time
-            metrics_total['detection_times'].append(detection_time)
-        traffic_history.clear()
+# --- Interface Helper Functions ---
 
 def get_friendly_names():
     """Map NPF GUIDs to friendly interface names using psutil."""
@@ -209,56 +200,187 @@ def select_interface():
             print("Invalid interface number. Exiting.")
             sys.exit(1)
     except ValueError:
-        print("Invalid input. Please enter a number corresponding to the interface.")
+        print("Invalid input. Please enter a valid number.")
         sys.exit(1)
     selected_iface = interfaces[iface_index]
     friendly_name = get_friendly_names().get(selected_iface, "Unknown")
     print(f"\nMonitoring interface: {selected_iface} ({friendly_name})\n")
     return selected_iface
 
-def start_sniffing(interface):
-    """Start sniffing packets on the specified interface."""
+# --- Packet Processing ---
+
+def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
+    """Process each captured packet and run the chosen detection method at the end of a window."""
+    global window_start_time, metrics_total, attack_state_syn, attack_state_udp
+    current_time = time.time()
+    elapsed_time = current_time - window_start_time
+
+    # Update both detectors with the incoming packet
+    thresh_detector.update(packet)
+    anomaly_detector.update(thresh_detector.packet_counts)
+
+    # If the window has elapsed, perform detection
+    if elapsed_time > WINDOW_SIZE:
+        detection_start = time.time()
+        if detection_method == 'threshold':
+            # Separate threshold checks for SYN and UDP
+            syn_count = thresh_detector.packet_counts.get('SYN', 0)
+            udp_count = thresh_detector.packet_counts.get('UDP', 0)
+            
+            # Handle SYN Flood detection
+            if syn_count > THRESHOLD_SYN:
+                if not attack_state_syn["active"]:
+                    attack_state_syn["active"] = True
+                    attack_state_syn["start_time"] = current_time
+                    attack_state_syn["sources"] = set(thresh_detector.source_ips)
+                    send_alert("DoS Alert: SYN Flood Detected",
+                               f"Attack started at {time.strftime('%H:%M:%S', time.localtime(current_time))}.\n"
+                               f"Source(s): {', '.join(attack_state_syn['sources'])}")
+                else:
+                    attack_state_syn["sources"].update(thresh_detector.source_ips)
+            else:
+                if attack_state_syn["active"]:
+                    attack_end_time = current_time
+                    duration = attack_end_time - attack_state_syn["start_time"]
+                    send_alert("DoS Alert: SYN Flood Ended",
+                               f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(attack_end_time))}.\n"
+                               f"Duration: {duration:.2f} seconds.\n"
+                               f"Source(s): {', '.join(attack_state_syn['sources'])}")
+                    metrics_total['attack_durations'].append(duration)
+                    metrics_total['attack_sources'].append(list(attack_state_syn["sources"]))
+                    attack_state_syn["active"] = False
+                    attack_state_syn["start_time"] = None
+                    attack_state_syn["sources"] = set()
+            
+            # Handle UDP Flood detection
+            if udp_count > THRESHOLD_UDP:
+                if not attack_state_udp["active"]:
+                    attack_state_udp["active"] = True
+                    attack_state_udp["start_time"] = current_time
+                    attack_state_udp["sources"] = set(thresh_detector.source_ips)
+                    send_alert("DoS Alert: UDP Flood Detected",
+                               f"Attack started at {time.strftime('%H:%M:%S', time.localtime(current_time))}.\n"
+                               f"Source(s): {', '.join(attack_state_udp['sources'])}")
+                else:
+                    attack_state_udp["sources"].update(thresh_detector.source_ips)
+            else:
+                if attack_state_udp["active"]:
+                    attack_end_time = current_time
+                    duration = attack_end_time - attack_state_udp["start_time"]
+                    send_alert("DoS Alert: UDP Flood Ended",
+                               f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(attack_end_time))}.\n"
+                               f"Duration: {duration:.2f} seconds.\n"
+                               f"Source(s): {', '.join(attack_state_udp['sources'])}")
+                    metrics_total['attack_durations'].append(duration)
+                    metrics_total['attack_sources'].append(list(attack_state_udp["sources"]))
+                    attack_state_udp["active"] = False
+                    attack_state_udp["start_time"] = None
+                    attack_state_udp["sources"] = set()
+            
+            if syn_count > THRESHOLD_SYN or udp_count > THRESHOLD_UDP:
+                metrics_total['true_positives'] += 1
+
+        elif detection_method == 'anomaly':
+            if anomaly_detector.detect():
+                send_alert("DoS Alert: Anomalous Traffic Detected",
+                           f"Anomalous traffic pattern detected in the last {WINDOW_SIZE} seconds.")
+                metrics_total['true_positives'] += 1
+
+        detection_time = time.time() - detection_start
+        metrics_total['detection_times'].append(detection_time)
+        log_metrics()
+
+        # Reset detectors and update the window start time for the next window
+        thresh_detector.reset()
+        anomaly_detector.reset()
+        window_start_time = current_time
+
+def packet_callback(packet, detection_method, thresh_detector, anomaly_detector):
+    process_packet(packet, detection_method, thresh_detector, anomaly_detector)
+
+def start_sniffing(interface, detection_method):
+    """Start sniffing packets on the specified interface with the selected detection method."""
     print("Starting packet sniffing...\n")
-    sniff(iface=interface, filter="ip", prn=process_packet, store=False, stop_filter=lambda x: stop_sniffing)
+    thresh_detector = ThresholdDetector(THRESHOLD_SYN, THRESHOLD_UDP)
+    anomaly_detector = AnomalyDetector(ANOMALY_THRESHOLD)
+    sniff(iface=interface,
+          filter="ip",
+          prn=lambda pkt: packet_callback(pkt, detection_method, thresh_detector, anomaly_detector),
+          store=False,
+          stop_filter=lambda x: stop_sniffing)
+
+# --- Main Function with Interactive Prompts ---
 
 def main():
-    """Main function to start the DoS Alarm System."""
-    print("Starting DoS Alarm System...")
+    print("Welcome to the DoS Alarm System!")
+    
+    # Ask user which network interface to monitor.
+    interface = select_interface()
+    
+    # Ask user for the detection method.
+    detection_method = input("Select detection method ('threshold' or 'anomaly'): ").strip().lower()
+    if detection_method not in ["threshold", "anomaly"]:
+        print("Invalid detection method. Defaulting to 'threshold'.")
+        detection_method = "threshold"
+    
+    # Ask user for duration (in seconds)
+    time_limit_input = input("Enter duration to monitor in seconds (leave blank for continuous monitoring): ").strip()
+    time_limit = None
+    if time_limit_input:
+        try:
+            time_limit = int(time_limit_input)
+        except ValueError:
+            print("Invalid input. Running continuously.")
+            time_limit = None
+
+    print(f"\nMonitoring on {interface} using {detection_method} detection method.")
+    if time_limit:
+        print(f"Monitoring for {time_limit} seconds.\n")
+    else:
+        print("Monitoring continuously until you press Ctrl+C.\n")
+    
     # Initialize performance metrics file
     with open(METRICS_FILE, 'w') as f:
         f.write("DoS Alarm System Performance Metrics\n")
         f.write("====================================\n\n")
     
-    # Select network interface
-    interface = select_interface()
-    
     # Start sniffing in a separate thread to allow graceful shutdown
-    sniff_thread = threading.Thread(target=start_sniffing, args=(interface,))
+    sniff_thread = threading.Thread(target=start_sniffing, args=(interface, detection_method))
     sniff_thread.start()
+    
+    # If a time limit is provided, start a timer to stop sniffing after the given duration.
+    if time_limit is not None:
+        def timer_stop():
+            global stop_sniffing
+            time.sleep(time_limit)
+            print("\nTime limit reached. Stopping DoS Alarm System...")
+            stop_sniffing = True
+        timer_thread = threading.Thread(target=timer_stop)
+        timer_thread.start()
     
     try:
         while sniff_thread.is_alive():
             sniff_thread.join(timeout=1)
     except KeyboardInterrupt:
-        print("\nStopping DoS Alarm System...")
+        print("\nCtrl+C detected. Stopping DoS Alarm System...")
         global stop_sniffing
         stop_sniffing = True
         sniff_thread.join()
-        # Log final metrics
-        log_metrics()
-        # Print cumulative metrics to console
-        print("\n=== Cumulative Performance Metrics ===")
-        print(f"True Positives: {metrics_total['true_positives']}")
-        print(f"False Positives: {metrics_total['false_positives']}")
-        print(f"False Negatives: {metrics_total['false_negatives']}")
-        if metrics_total['detection_times']:
-            average_detection_time = sum(metrics_total['detection_times']) / len(metrics_total['detection_times'])
-        else:
-            average_detection_time = 0
-        print(f"Average Detection Time: {average_detection_time:.2f} seconds")
-        print("======================================")
-        print(f"Performance metrics have been logged to {METRICS_FILE}")
-        sys.exit(0)
+    
+    # Final logging and display of metrics
+    log_metrics()
+    print("\n=== Cumulative Performance Metrics ===")
+    print(f"True Positives: {metrics_total['true_positives']}")
+    print(f"False Positives: {metrics_total['false_positives']}")
+    print(f"False Negatives: {metrics_total['false_negatives']}")
+    if metrics_total['detection_times']:
+        avg_time = sum(metrics_total['detection_times']) / len(metrics_total['detection_times'])
+    else:
+        avg_time = 0
+    print(f"Average Detection Time: {avg_time:.2f} seconds")
+    print("======================================")
+    print(f"Performance metrics have been logged to {METRICS_FILE}")
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()
