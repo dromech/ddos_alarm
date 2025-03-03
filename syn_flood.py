@@ -43,4 +43,4 @@ except KeyboardInterrupt:
     sys.exit(0)
 
 print("SYN flood completed.")
-print(f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(current_time))}.")
+print(f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(end_time))}.")
