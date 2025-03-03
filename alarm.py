@@ -18,9 +18,9 @@ import threading
     - Encapsulate each detection method in its own function or class. (done so far)
 
 - Enhance anomaly detection:
-    - Tune KMeans parameters (e.g., number of clusters, initialization settings).
-    - Implement an additional anomaly detection model (such as an autoencoder).
-    - Expand feature extraction to include additional traffic characteristics (e.g., packet sizes, inter-arrival times).
+    - Tune KMeans parameters (e.g., number of clusters, initialization settings). (done)
+    - Implement an additional anomaly detection model (such as an autoencoder). (maybe not)
+    - Expand feature extraction to include additional traffic characteristics (e.g., packet sizes, inter-arrival times). (maybe not)
 
 - Improve performance metric logging:
     - Log additional details such as CPU and memory usage during detection.
@@ -45,23 +45,19 @@ import threading
 """
 # TO DO ---------------------------------------------------
 
-# Configuration
-THRESHOLD_SYN = 100  # SYN packets per window to trigger alert
-THRESHOLD_UDP = 200  # UDP packets per window to trigger alert
-WINDOW_SIZE = 10     # Time window in seconds
-ANOMALY_THRESHOLD = 0.1  # Threshold for anomaly detection ratio
-
-# Performance Metrics File
+THRESHOLD_SYN = 100  # Default fallback
+THRESHOLD_UDP = 200  # Default fallback
+WINDOW_SIZE = 10     # Default fallback (seconds)
 METRICS_FILE = 'performance_metrics.txt'
 
-# Globals for Threshold-Based Detection
+stop_sniffing = False
+window_start_time = time.time()
+
 packet_counts = defaultdict(int)
 start_time = time.time()
 
-# Globals for Anomaly Detection
 traffic_history = []
 
-# Metrics Counters (Cumulative)
 metrics_total = {
     'true_positives': 0,
     'false_positives': 0,
@@ -69,25 +65,19 @@ metrics_total = {
     'detection_times': [],
     'window_pps': [],
     'attack_durations': [],
-    'attack_pps': [],  
+    'attack_pps': [],
     'attack_sources': []
 }
 
-# Flag to control sniffing
-stop_sniffing = False
-window_start_time = time.time()
-
-# Global variables for enhanced threshold attack tracking
-# Separate state for SYN and UDP floods
 attack_state_syn = {"active": False, "start_time": None, "sources": set()}
 attack_state_udp = {"active": False, "start_time": None, "sources": set()}
 
+
 def send_alert(subject, body):
-    """Print alert to console."""
     print(f"\n=== ALERT ===\n{subject}\n{body}\n==============\n")
 
+
 def log_metrics():
-    """Append the current window's metrics to the performance metrics file."""
     with open(METRICS_FILE, 'a') as f:
         f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"True Positives (Window): {metrics_total['true_positives']}\n")
@@ -100,15 +90,13 @@ def log_metrics():
         f.write(f"Average Detection Time (Window): {avg_time:.2f} seconds\n")
         f.write("-----\n")
 
-# --- Detector Classes ---
 
 class ThresholdDetector:
-    """Handles threshold-based detection by counting packets."""
     def __init__(self, syn_threshold, udp_threshold):
         self.syn_threshold = syn_threshold
         self.udp_threshold = udp_threshold
         self.packet_counts = defaultdict(int)
-        self.source_ips = set()  # Collect source IP addresses
+        self.source_ips = set()
     
     def update(self, packet):
         if packet.haslayer(IP):
@@ -120,78 +108,70 @@ class ThresholdDetector:
         if packet.haslayer(UDP):
             self.packet_counts['UDP'] += 1
     
-    def detect(self):
-        alerts = []
-        if self.packet_counts['SYN'] > self.syn_threshold:
-            alerts.append(f"High SYN packet rate: {self.packet_counts['SYN']} packets in {WINDOW_SIZE} seconds")
-        if self.packet_counts['UDP'] > self.udp_threshold:
-            alerts.append(f"High UDP packet rate: {self.packet_counts['UDP']} packets in {WINDOW_SIZE} seconds")
-        return alerts
-    
     def reset(self):
         self.packet_counts.clear()
         self.source_ips.clear()
 
+
 class AnomalyDetector:
-    """Handles anomaly detection using KMeans clustering on traffic history."""
-    def __init__(self, anomaly_threshold):
-        self.anomaly_threshold = anomaly_threshold
-        self.history = []  # Each element is [SYN_count, UDP_count]
+    """Anomaly detection using KMeans and distance to centroid."""
     
-    def update(self, current_counts):
-        self.history.append([current_counts.get('SYN', 0), current_counts.get('UDP', 0)])
+    def __init__(self, n_clusters=1, distance_threshold=10.0, max_history=50):
+        self.n_clusters = n_clusters
+        self.distance_threshold = distance_threshold
+        self.max_history = max_history
+        self.history = []  # store [syn_count, udp_count] per window
+    
+    def update(self, syn_count, udp_count):
+        self.history.append([syn_count, udp_count])
+        if len(self.history) > self.max_history:
+            self.history.pop(0)
     
     def detect(self):
-        if len(self.history) < 2:
+        if len(self.history) < self.n_clusters:
             return False
-        try:
-            kmeans = KMeans(n_clusters=2, random_state=0)
-            features = np.array(self.history)
-            kmeans.fit(features)
-            labels = kmeans.labels_
-            counts = np.bincount(labels)
-            dominant_cluster = np.argmax(counts)
-            minority_cluster = 1 - dominant_cluster
-            if counts[minority_cluster] / counts[dominant_cluster] < self.anomaly_threshold:
-                return True
-        except Exception as e:
-            print(f"Anomaly detection error: {e}")
-        return False
+        
+        X = np.array(self.history)
+        kmeans = KMeans(n_clusters=self.n_clusters, random_state=0)
+        labels = kmeans.fit_predict(X)
+        
+        # newest data point
+        new_point = X[-1]
+        new_point_label = labels[-1]
+        
+        centroid = kmeans.cluster_centers_[new_point_label]
+        distance = np.linalg.norm(new_point - centroid)
+        
+        return distance > self.distance_threshold
     
-    def reset(self):
-        self.history = []
+    def remove_last(self):
+        if self.history:
+            self.history.pop()
 
-# --- Interface Helper Functions ---
 
 def get_friendly_names():
-    """Map NPF GUIDs to friendly interface names using psutil."""
-    # Get list of network interfaces from Scapy
     scapy_interfaces = get_if_list()
-    
-    # Get list of network interfaces from psutil
     psutil_interfaces = psutil.net_if_addrs()
     psutil_names = list(psutil_interfaces.keys())
     
-    # Create a mapping based on the order (may not always be accurate)
     interface_map = {}
     for i, iface in enumerate(scapy_interfaces):
         if i < len(psutil_names):
             interface_map[iface] = psutil_names[i]
         else:
             interface_map[iface] = "Unknown"
-    
     return interface_map
 
+
 def list_interfaces_with_names():
-    """List available network interfaces with friendly names."""
     interface_map = get_friendly_names()
     print("\nAvailable Network Interfaces:")
     for idx, iface in enumerate(get_if_list()):
         friendly_name = interface_map.get(iface, "Unknown")
         print(f"{idx}: {iface} ({friendly_name})")
 
+
 def select_interface():
-    """Prompt user to select a network interface."""
     list_interfaces_with_names()
     try:
         iface_index = int(input("\nSelect the interface to monitor (enter the number): "))
@@ -207,28 +187,25 @@ def select_interface():
     print(f"\nMonitoring interface: {selected_iface} ({friendly_name})\n")
     return selected_iface
 
-# --- Packet Processing ---
 
 def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
-    """Process each captured packet and run the chosen detection method at the end of a window."""
-    global window_start_time, metrics_total, attack_state_syn, attack_state_udp
+    global window_start_time, metrics_total, attack_state_syn, attack_state_udp, WINDOW_SIZE
+    
     current_time = time.time()
     elapsed_time = current_time - window_start_time
 
-    # Update both detectors with the incoming packet
+    # Always update threshold detector each packet
     thresh_detector.update(packet)
-    anomaly_detector.update(thresh_detector.packet_counts)
 
-    # If the window has elapsed, perform detection
     if elapsed_time > WINDOW_SIZE:
         detection_start = time.time()
+        
+        syn_count = thresh_detector.packet_counts.get('SYN', 0)
+        udp_count = thresh_detector.packet_counts.get('UDP', 0)
+        
         if detection_method == 'threshold':
-            # Separate threshold checks for SYN and UDP
-            syn_count = thresh_detector.packet_counts.get('SYN', 0)
-            udp_count = thresh_detector.packet_counts.get('UDP', 0)
-            
-            # Handle SYN Flood detection
-            if syn_count > THRESHOLD_SYN:
+            # --- Threshold detection logic ---
+            if syn_count > thresh_detector.syn_threshold:
                 if not attack_state_syn["active"]:
                     attack_state_syn["active"] = True
                     attack_state_syn["start_time"] = current_time
@@ -251,9 +228,8 @@ def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
                     attack_state_syn["active"] = False
                     attack_state_syn["start_time"] = None
                     attack_state_syn["sources"] = set()
-            
-            # Handle UDP Flood detection
-            if udp_count > THRESHOLD_UDP:
+
+            if udp_count > thresh_detector.udp_threshold:
                 if not attack_state_udp["active"]:
                     attack_state_udp["active"] = True
                     attack_state_udp["start_time"] = current_time
@@ -276,54 +252,161 @@ def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
                     attack_state_udp["active"] = False
                     attack_state_udp["start_time"] = None
                     attack_state_udp["sources"] = set()
-            
-            if syn_count > THRESHOLD_SYN or udp_count > THRESHOLD_UDP:
+
+            if (syn_count > thresh_detector.syn_threshold) or (udp_count > thresh_detector.udp_threshold):
                 metrics_total['true_positives'] += 1
 
-        elif detection_method == 'anomaly':
+        if detection_method == 'anomaly':
+            # Update anomaly detector once per window
+            anomaly_detector.update(syn_count, udp_count)
+            # Then check if the newest point is anomalous
             if anomaly_detector.detect():
+                anomaly_detector.remove_last() # Remove the anomaly traffic to avoid it becoming base
                 send_alert("DoS Alert: Anomalous Traffic Detected",
-                           f"Anomalous traffic pattern detected in the last {WINDOW_SIZE} seconds.")
+                           f"Anomalous traffic in last {WINDOW_SIZE} seconds.")
                 metrics_total['true_positives'] += 1
-
+        
         detection_time = time.time() - detection_start
         metrics_total['detection_times'].append(detection_time)
         log_metrics()
 
-        # Reset detectors and update the window start time for the next window
+        # Reset threshold each window, but NOT the anomaly detector
         thresh_detector.reset()
-        anomaly_detector.reset()
         window_start_time = current_time
+
 
 def packet_callback(packet, detection_method, thresh_detector, anomaly_detector):
     process_packet(packet, detection_method, thresh_detector, anomaly_detector)
 
-def start_sniffing(interface, detection_method):
-    """Start sniffing packets on the specified interface with the selected detection method."""
+
+def start_sniffing(interface, detection_method, syn_thr, udp_thr, n_clust, dist_thr, max_hist):
     print("Starting packet sniffing...\n")
-    thresh_detector = ThresholdDetector(THRESHOLD_SYN, THRESHOLD_UDP)
-    anomaly_detector = AnomalyDetector(ANOMALY_THRESHOLD)
+    
+    # Create detectors based on user’s inputs
+    if detection_method == 'threshold':
+        thresh_detector = ThresholdDetector(syn_threshold=syn_thr,
+                                            udp_threshold=udp_thr)
+        anomaly_detector = None  # Not used
+    else:  # anomaly
+        # We'll still create a threshold detector for packet counting
+        # but with a large threshold so it doesn't do real detection
+        thresh_detector = ThresholdDetector(999999, 999999)
+        anomaly_detector = AnomalyDetector(n_clusters=n_clust,
+                                           distance_threshold=dist_thr,
+                                           max_history=max_hist)
+    
     sniff(iface=interface,
           filter="ip",
           prn=lambda pkt: packet_callback(pkt, detection_method, thresh_detector, anomaly_detector),
           store=False,
           stop_filter=lambda x: stop_sniffing)
 
-# --- Main Function with Interactive Prompts ---
+
+# --- Utility to measure traffic for x seconds, to recommend thresholds ---
+def measure_traffic_sample(interface, sample_time=30):
+    """Sniff for 'sample_time' seconds, return average packets/second for SYN and UDP."""
+    local_counts = defaultdict(int)
+
+    def sample_callback(pkt):
+        if pkt.haslayer(TCP):
+            tcp_layer = pkt.getlayer(TCP)
+            if tcp_layer.flags == 'S':
+                local_counts['SYN'] += 1
+        if pkt.haslayer(UDP):
+            local_counts['UDP'] += 1
+    
+    print(f"\nMeasuring traffic on {interface} for {sample_time} seconds to recommend thresholds...")
+    t0 = time.time()
+    sniff(iface=interface, store=False, prn=sample_callback,
+          stop_filter=lambda x: (time.time() - t0) > sample_time)
+    
+    # Average packets per second
+    syn_rate = local_counts['SYN'] / float(sample_time)
+    udp_rate = local_counts['UDP'] / float(sample_time)
+    return syn_rate, udp_rate
+
 
 def main():
+    global stop_sniffing
+    global WINDOW_SIZE
+
     print("Welcome to the DoS Alarm System!")
     
-    # Ask user which network interface to monitor.
+    # 1) Select interface
     interface = select_interface()
     
-    # Ask user for the detection method.
+    # 2) Ask user for the detection method
     detection_method = input("Select detection method ('threshold' or 'anomaly'): ").strip().lower()
     if detection_method not in ["threshold", "anomaly"]:
         print("Invalid detection method. Defaulting to 'threshold'.")
         detection_method = "threshold"
+
+    # 3) Ask user for the time window size
+    try:
+        w_size_input = input("Enter window size in seconds (default 10): ").strip()
+        if w_size_input:
+            WINDOW_SIZE = int(w_size_input)
+        else:
+            WINDOW_SIZE = 10
+    except ValueError:
+        print("Invalid window size. Defaulting to 10 seconds.")
+        WINDOW_SIZE = 10
     
-    # Ask user for duration (in seconds)
+    # 4) Based on detection method, ask for relevant parameters
+    syn_thr = THRESHOLD_SYN  # default
+    udp_thr = THRESHOLD_UDP  # default
+    n_clust = 2
+    dist_thr = 10.0
+    max_hist = 50
+    
+    if detection_method == "threshold":
+        # Ask user if they want an auto recommendation
+        auto_recommend = input("Would you like an auto-recommended threshold based on a short traffic sample? (y/n): ").strip().lower()
+        if auto_recommend == 'y':
+            # measure a short sample
+            test_time = input("How long would you like to monitor the traffic to form a sample?: ").strip()
+            if test_time:
+                test_time_length = int(test_time)
+            else:
+                test_time_length = 30
+            syn_rate, udp_rate = measure_traffic_sample(interface, test_time_length)
+            # For example, set thresholds as 3 times average pps * window size
+            recommended_syn = int((1 + syn_rate) * WINDOW_SIZE * 3)
+            recommended_udp = int((1 + udp_rate) * WINDOW_SIZE * 3)
+            print(f"Recommended SYN threshold ~ {recommended_syn}, UDP threshold ~ {recommended_udp}")
+            
+            try:
+                user_syn = input(f"Enter desired SYN threshold (default {recommended_syn}): ").strip()
+                user_udp = input(f"Enter desired UDP threshold (default {recommended_udp}): ").strip()
+                syn_thr = int(user_syn) if user_syn else recommended_syn
+                udp_thr = int(user_udp) if user_udp else recommended_udp
+            except ValueError:
+                # If invalid input, fall back
+                syn_thr = recommended_syn
+                udp_thr = recommended_udp
+                print("Invalid input. Using recommended thresholds.")
+        else:
+            # Let them input their own
+            try:
+                s_input = input(f"Enter custom SYN threshold (default {THRESHOLD_SYN}): ").strip()
+                u_input = input(f"Enter custom UDP threshold (default {THRESHOLD_UDP}): ").strip()
+                if s_input:
+                    syn_thr = int(s_input)
+                if u_input:
+                    udp_thr = int(u_input)
+            except ValueError:
+                print("Invalid threshold input. Using defaults.")
+
+    else:
+        # anomaly detection: ask for n_clusters, distance_threshold, max_history
+        try:
+            n_clust = int(input("Enter number of KMeans clusters (default 1): ").strip() or 1)
+            dist_thr = float(input("Enter distance threshold (default 10.0): ").strip() or 10.0)
+            max_hist = int(input("Enter max history (number of windows to keep) (default 50): ").strip() or 50)
+        except ValueError:
+            print("Invalid input. Using defaults for anomaly parameters.")
+
+    # 5) Ask user for duration (in seconds)
     time_limit_input = input("Enter duration to monitor in seconds (leave blank for continuous monitoring): ").strip()
     time_limit = None
     if time_limit_input:
@@ -333,7 +416,12 @@ def main():
             print("Invalid input. Running continuously.")
             time_limit = None
 
-    print(f"\nMonitoring on {interface} using {detection_method} detection method.")
+    print(f"\nMonitoring on {interface} using {detection_method} detection method with window size = {WINDOW_SIZE}s.")
+    if detection_method == "threshold":
+        print(f"Using SYN threshold = {syn_thr}  |  UDP threshold = {udp_thr}")
+    else:
+        print(f"Using n_clusters={n_clust}, distance_threshold={dist_thr}, max_history={max_hist}")
+    
     if time_limit:
         print(f"Monitoring for {time_limit} seconds.\n")
     else:
@@ -344,11 +432,13 @@ def main():
         f.write("DoS Alarm System Performance Metrics\n")
         f.write("====================================\n\n")
     
-    # Start sniffing in a separate thread to allow graceful shutdown
-    sniff_thread = threading.Thread(target=start_sniffing, args=(interface, detection_method))
+    # Start sniffing in a separate thread
+    sniff_thread = threading.Thread(
+        target=start_sniffing,
+        args=(interface, detection_method, syn_thr, udp_thr, n_clust, dist_thr, max_hist)
+    )
     sniff_thread.start()
     
-    # If a time limit is provided, start a timer to stop sniffing after the given duration.
     if time_limit is not None:
         def timer_stop():
             global stop_sniffing
@@ -363,11 +453,10 @@ def main():
             sniff_thread.join(timeout=1)
     except KeyboardInterrupt:
         print("\nCtrl+C detected. Stopping DoS Alarm System...")
-        global stop_sniffing
         stop_sniffing = True
         sniff_thread.join()
     
-    # Final logging and display of metrics
+    # Final logging and display
     log_metrics()
     print("\n=== Cumulative Performance Metrics ===")
     print(f"True Positives: {metrics_total['true_positives']}")
@@ -381,6 +470,7 @@ def main():
     print("======================================")
     print(f"Performance metrics have been logged to {METRICS_FILE}")
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
