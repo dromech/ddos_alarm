@@ -69,14 +69,14 @@ metrics_total = {
     'attack_sources': []
 }
 
-attack_state_syn = {"active": False, "start_time": None, "sources": set()}
-attack_state_udp = {"active": False, "start_time": None, "sources": set()}
+attack_state_syn = {"active": False, "start_time": None, "sources": set(), "peak_syn": 0, "peak_udp": 0}
+attack_state_udp = {"active": False, "start_time": None, "sources": set(), "peak_syn": 0, "peak_udp": 0}
 
 
 def send_alert(subject, body):
     print(f"\n=== ALERT ===\n{subject}\n{body}\n==============\n")
 
-
+# Old logging function (can be deleted)
 def log_metrics():
     with open(METRICS_FILE, 'a') as f:
         f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -89,6 +89,34 @@ def log_metrics():
             avg_time = 0
         f.write(f"Average Detection Time (Window): {avg_time:.2f} seconds\n")
         f.write("-----\n")
+      
+
+# New loggin function
+def log_attack(attack_type, start_time=None, end_time=None, sources=None, extra_info=None):
+    with open(METRICS_FILE, 'a') as f:
+        now_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        f.write(f"Log Entry Time: {now_str}\n")
+        f.write(f"Attack Type: {attack_type}\n")
+        
+        if start_time is not None:
+            start_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))
+            f.write(f"Start Time: {start_str}\n")
+        
+        if end_time is not None and start_time is not None:
+            end_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time))
+            duration = end_time - start_time
+            f.write(f"End Time: {end_str}\n")
+            f.write(f"Duration: {duration:.2f} seconds\n")
+        
+        if sources:
+            if isinstance(sources, set):
+                sources = list(sources)
+            f.write(f"Sources: {', '.join(sources)}\n")
+        
+        if extra_info:
+            f.write(f"Details: {extra_info}\n")
+        
+        f.write("----------------------------------------------------\n\n")
 
 
 class ThresholdDetector:
@@ -204,16 +232,22 @@ def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
         udp_count = thresh_detector.packet_counts.get('UDP', 0)
         
         if detection_method == 'threshold':
-            # --- Threshold detection logic ---
+            # Threshold detection logic 
             if syn_count > thresh_detector.syn_threshold:
                 if not attack_state_syn["active"]:
                     attack_state_syn["active"] = True
                     attack_state_syn["start_time"] = current_time
                     attack_state_syn["sources"] = set(thresh_detector.source_ips)
+                    attack_state_syn["peak_syn"] = syn_count
+                    attack_state_syn["peak_udp"] = udp_count
                     send_alert("DoS Alert: SYN Flood Detected",
                                f"Attack started at {time.strftime('%H:%M:%S', time.localtime(current_time))}.\n"
                                f"Source(s): {', '.join(attack_state_syn['sources'])}")
                 else:
+                    if syn_count > attack_state_syn["peak_syn"]:
+                        attack_state_syn["peak_syn"] = syn_count
+                    if udp_count > attack_state_syn["peak_udp"]:
+                        attack_state_syn["peak_udp"] = udp_count
                     attack_state_syn["sources"].update(thresh_detector.source_ips)
             else:
                 if attack_state_syn["active"]:
@@ -223,21 +257,34 @@ def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
                                f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(attack_end_time))}.\n"
                                f"Duration: {duration:.2f} seconds.\n"
                                f"Source(s): {', '.join(attack_state_syn['sources'])}")
-                    metrics_total['attack_durations'].append(duration)
-                    metrics_total['attack_sources'].append(list(attack_state_syn["sources"]))
+                    log_attack(attack_type="SYN Flood",
+                               start_time=attack_state_udp["start_time"],
+                               end_time=attack_end_time,
+                               sources=attack_state_udp["sources"],
+                               extra_info=(f"Peak SYN: {attack_state_syn['peak_syn']}, "f"Peak UDP: {attack_state_syn['peak_udp']}"))
+                    # metrics_total['attack_durations'].append(duration)
+                    # metrics_total['attack_sources'].append(list(attack_state_syn["sources"]))
                     attack_state_syn["active"] = False
                     attack_state_syn["start_time"] = None
                     attack_state_syn["sources"] = set()
+                    attack_state_syn["peak_syn"] = 0
+                    attack_state_syn["peak_udp"] = 0
 
             if udp_count > thresh_detector.udp_threshold:
                 if not attack_state_udp["active"]:
                     attack_state_udp["active"] = True
                     attack_state_udp["start_time"] = current_time
                     attack_state_udp["sources"] = set(thresh_detector.source_ips)
+                    attack_state_syn["peak_syn"] = syn_count
+                    attack_state_syn["peak_udp"] = udp_count
                     send_alert("DoS Alert: UDP Flood Detected",
                                f"Attack started at {time.strftime('%H:%M:%S', time.localtime(current_time))}.\n"
                                f"Source(s): {', '.join(attack_state_udp['sources'])}")
                 else:
+                    if syn_count > attack_state_syn["peak_syn"]:
+                        attack_state_syn["peak_syn"] = syn_count
+                    if udp_count > attack_state_syn["peak_udp"]:
+                        attack_state_syn["peak_udp"] = udp_count
                     attack_state_udp["sources"].update(thresh_detector.source_ips)
             else:
                 if attack_state_udp["active"]:
@@ -247,14 +294,21 @@ def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
                                f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(attack_end_time))}.\n"
                                f"Duration: {duration:.2f} seconds.\n"
                                f"Source(s): {', '.join(attack_state_udp['sources'])}")
-                    metrics_total['attack_durations'].append(duration)
-                    metrics_total['attack_sources'].append(list(attack_state_udp["sources"]))
+                    log_attack(attack_type="UDP Flood",
+                               start_time=attack_state_udp["start_time"],
+                               end_time=attack_end_time,
+                               sources=attack_state_udp["sources"],
+                               extra_info=(f"Peak SYN: {attack_state_syn['peak_syn']}, "f"Peak UDP: {attack_state_syn['peak_udp']}"))
+                    # metrics_total['attack_durations'].append(duration)
+                    # metrics_total['attack_sources'].append(list(attack_state_udp["sources"]))
                     attack_state_udp["active"] = False
                     attack_state_udp["start_time"] = None
                     attack_state_udp["sources"] = set()
+                    attack_state_syn["peak_syn"] = 0
+                    attack_state_syn["peak_udp"] = 0
 
-            if (syn_count > thresh_detector.syn_threshold) or (udp_count > thresh_detector.udp_threshold):
-                metrics_total['true_positives'] += 1
+            # if (syn_count > thresh_detector.syn_threshold) or (udp_count > thresh_detector.udp_threshold):
+            #     metrics_total['true_positives'] += 1
 
         if detection_method == 'anomaly':
             # Update anomaly detector once per window
@@ -264,11 +318,13 @@ def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
                 anomaly_detector.remove_last() # Remove the anomaly traffic to avoid it becoming base
                 send_alert("DoS Alert: Anomalous Traffic Detected",
                            f"Anomalous traffic in last {WINDOW_SIZE} seconds.")
-                metrics_total['true_positives'] += 1
+                log_attack(attack_type="Anomaly Detected",
+                           extra_info=f"SYN={syn_count}, UDP={udp_count}")
+                # metrics_total['true_positives'] += 1
         
         detection_time = time.time() - detection_start
-        metrics_total['detection_times'].append(detection_time)
-        log_metrics()
+        # metrics_total['detection_times'].append(detection_time)
+        # log_metrics()
 
         # Reset threshold each window, but NOT the anomaly detector
         thresh_detector.reset()
@@ -302,7 +358,7 @@ def start_sniffing(interface, detection_method, syn_thr, udp_thr, n_clust, dist_
           stop_filter=lambda x: stop_sniffing)
 
 
-# --- Utility to measure traffic for x seconds, to recommend thresholds ---
+# Utility to measure traffic for x seconds, to recommend thresholds
 def measure_traffic_sample(interface, sample_time=30):
     """Sniff for 'sample_time' seconds, return average packets/second for SYN and UDP."""
     local_counts = defaultdict(int)
@@ -364,7 +420,7 @@ def main():
         auto_recommend = input("Would you like an auto-recommended threshold based on a short traffic sample? (y/n): ").strip().lower()
         if auto_recommend == 'y':
             # measure a short sample
-            test_time = input("How long would you like to monitor the traffic to form a sample?: ").strip()
+            test_time = input("How long (in seconds) would you like to monitor the traffic to form a sample?: ").strip()
             if test_time:
                 test_time_length = int(test_time)
             else:
@@ -457,18 +513,18 @@ def main():
         sniff_thread.join()
     
     # Final logging and display
-    log_metrics()
-    print("\n=== Cumulative Performance Metrics ===")
-    print(f"True Positives: {metrics_total['true_positives']}")
-    print(f"False Positives: {metrics_total['false_positives']}")
-    print(f"False Negatives: {metrics_total['false_negatives']}")
-    if metrics_total['detection_times']:
-        avg_time = sum(metrics_total['detection_times']) / len(metrics_total['detection_times'])
-    else:
-        avg_time = 0
-    print(f"Average Detection Time: {avg_time:.2f} seconds")
-    print("======================================")
-    print(f"Performance metrics have been logged to {METRICS_FILE}")
+    # log_metrics()
+    # print("\n=== Cumulative Performance Metrics ===")
+    # print(f"True Positives: {metrics_total['true_positives']}")
+    # print(f"False Positives: {metrics_total['false_positives']}")
+    # print(f"False Negatives: {metrics_total['false_negatives']}")
+    # if metrics_total['detection_times']:
+    #     avg_time = sum(metrics_total['detection_times']) / len(metrics_total['detection_times'])
+    # else:
+    #     avg_time = 0
+    # print(f"Average Detection Time: {avg_time:.2f} seconds")
+    # print("======================================")
+    # print(f"Performance metrics have been logged to {METRICS_FILE}")
     sys.exit(0)
 
 
