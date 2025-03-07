@@ -71,6 +71,7 @@ metrics_total = {
 
 attack_state_syn = {"active": False, "start_time": None, "sources": set(), "peak_syn": 0, "peak_udp": 0}
 attack_state_udp = {"active": False, "start_time": None, "sources": set(), "peak_syn": 0, "peak_udp": 0}
+attack_state_anomaly = {"active": False, "start_time": None, "sources": set(), "peak_syn": 0, "peak_udp": 0}
 
 
 def send_alert(subject, body):
@@ -92,7 +93,7 @@ def log_metrics():
       
 
 # New loggin function
-def log_attack(attack_type, start_time=None, end_time=None, sources=None, extra_info=None):
+def log_attack(attack_type, start_time=None, end_time=None, sources=None, extra_info=None, detection_method=None):
     with open(METRICS_FILE, 'a') as f:
         now_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
         f.write(f"Log Entry Time: {now_str}\n")
@@ -107,6 +108,9 @@ def log_attack(attack_type, start_time=None, end_time=None, sources=None, extra_
             duration = end_time - start_time
             f.write(f"End Time: {end_str}\n")
             f.write(f"Duration: {duration:.2f} seconds\n")
+
+        if detection_method is not None:
+            f.write(f"Detection Method: {detection_method}\n")
         
         if sources:
             if isinstance(sources, set):
@@ -313,16 +317,57 @@ def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
         if detection_method == 'anomaly':
             # Update anomaly detector once per window
             anomaly_detector.update(syn_count, udp_count)
+            is_anomaly = anomaly_detector.detect()
             # Then check if the newest point is anomalous
-            if anomaly_detector.detect():
+            if is_anomaly:
                 anomaly_detector.remove_last() # Remove the anomaly traffic to avoid it becoming base
-                send_alert("DoS Alert: Anomalous Traffic Detected",
-                           f"Anomalous traffic in last {WINDOW_SIZE} seconds.")
-                log_attack(attack_type="Anomaly Detected",
-                           extra_info=f"SYN={syn_count}, UDP={udp_count}")
+                 # If not active, start a new "anomaly" attack
+                if not attack_state_anomaly["active"]:
+                    attack_state_anomaly["active"] = True
+                    attack_state_anomaly["start_time"] = current_time
+                    attack_state_anomaly["sources"] = set(thresh_detector.source_ips)
+                    attack_state_anomaly["peak_syn"] = syn_count
+                    attack_state_anomaly["peak_udp"] = udp_count
+                    send_alert("DoS Alert: Anomalous Traffic Detected",
+                            f"Anomalous traffic in last {WINDOW_SIZE} seconds.")
+                else:
+                    # Ongoing anomaly; update peaks & sources
+                    if syn_count > attack_state_anomaly["peak_syn"]:
+                        attack_state_anomaly["peak_syn"] = syn_count
+                    if udp_count > attack_state_anomaly["peak_udp"]:
+                        attack_state_anomaly["peak_udp"] = udp_count
+                    attack_state_anomaly["sources"].update(thresh_detector.source_ips)
+            else:
+                 # If we had an anomaly ongoing, end it
+                if attack_state_anomaly["active"]:
+                    attack_end_time = current_time
+                    duration = attack_end_time - attack_state_anomaly["start_time"]
+                    send_alert(
+                        "DoS Alert: Anomaly Ended",
+                        f"Attack ended at {time.strftime('%H:%M:%S', time.localtime(attack_end_time))}.\n"
+                        f"Duration: {duration:.2f} seconds.\n"
+                        f"Source(s): {', '.join(attack_state_anomaly['sources'])}"
+                    )
+                    log_attack(
+                        attack_type="Anomaly",
+                        start_time=attack_state_anomaly["start_time"],
+                        end_time=attack_end_time,
+                        sources=attack_state_anomaly["sources"],
+                        extra_info=(
+                            f"Peak SYN: {attack_state_anomaly['peak_syn']}, "
+                            f"Peak UDP: {attack_state_anomaly['peak_udp']}"
+                        ),
+                        detection_method="anomaly"
+                    )
+                    # Reset anomaly attack state
+                    attack_state_anomaly["active"] = False
+                    attack_state_anomaly["start_time"] = None
+                    attack_state_anomaly["sources"] = set()
+                    attack_state_anomaly["peak_syn"] = 0
+                    attack_state_anomaly["peak_udp"] = 0
                 # metrics_total['true_positives'] += 1
         
-        detection_time = time.time() - detection_start
+        # detection_time = time.time() - detection_start
         # metrics_total['detection_times'].append(detection_time)
         # log_metrics()
 
