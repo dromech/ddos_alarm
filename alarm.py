@@ -8,6 +8,7 @@ import sys
 import threading
 import os
 import json
+from datetime import datetime
 
 # Liam Calder
 
@@ -50,7 +51,7 @@ import json
 THRESHOLD_SYN = 100  # Default fallback
 THRESHOLD_UDP = 200  # Default fallback
 WINDOW_SIZE = 10     # Default fallback (seconds)
-METRICS_FILE = 'performance_metrics.txt'
+current_metrics_file = None  # Will be set by initialize_metrics_session
 
 stop_sniffing = False
 window_start_time = time.time()
@@ -79,27 +80,28 @@ attack_state_anomaly = {"active": False, "start_time": None, "sources": set(), "
 def send_alert(subject, body):
     print(f"\n=== ALERT ===\n{subject}\n{body}\n==============\n")
 
-# Old logging function (can be deleted)
-def log_metrics():
-    with open(METRICS_FILE, 'a') as f:
-        f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"True Positives (Window): {metrics_total['true_positives']}\n")
-        f.write(f"False Positives (Window): {metrics_total['false_positives']}\n")
-        f.write(f"False Negatives (Window): {metrics_total['false_negatives']}\n")
-        if metrics_total['detection_times']:
-            avg_time = sum(metrics_total['detection_times']) / len(metrics_total['detection_times'])
-        else:
-            avg_time = 0
-        f.write(f"Average Detection Time (Window): {avg_time:.2f} seconds\n")
-        f.write("-----\n")
-      
 
-# New loggin function
+def get_metrics_filename():
+    # Create metrics directory if it doesn't exist
+    metrics_dir = "metrics"
+    if not os.path.exists(metrics_dir):
+        os.makedirs(metrics_dir)
+    
+    # Generate timestamp for filename
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    
+    # Create filename with timestamp
+    filename = os.path.join(metrics_dir, f"performance_metrics_{timestamp}.txt")
+    
+    return filename
+      
 def log_attack(attack_type, start_time=None, end_time=None, sources=None, extra_info=None, detection_method=None):
-    with open(METRICS_FILE, 'a') as f:
+    # Use the current session's metrics file
+    global current_metrics_file
+    
+    with open(current_metrics_file, 'a') as f:
         now_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
         f.write(f"Log Entry Time: {now_str}\n")
-        f.write(f"Attack Type: {attack_type}\n")
         
         if start_time is not None:
             start_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))
@@ -123,6 +125,29 @@ def log_attack(attack_type, start_time=None, end_time=None, sources=None, extra_
             f.write(f"Details: {extra_info}\n")
         
         f.write("----------------------------------------------------\n\n")
+
+# Function to initialize metrics file with session information
+def initialize_metrics_session():
+    global current_metrics_file
+    metrics_file = get_metrics_filename()
+    
+    with open(metrics_file, 'w') as f:
+        f.write("DoS Alarm System Performance Metrics\n")
+        f.write("====================================\n")
+        f.write(f"Session Start: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        # Add system info
+        f.write(f"System Information:\n")
+        # We could add more system information here
+        try:
+            import platform
+            f.write(f"  OS: {platform.system()} {platform.release()}\n")
+            f.write(f"  Python: {platform.python_version()}\n")
+        except ImportError:
+            pass
+        f.write("====================================\n\n")
+
+    current_metrics_file = metrics_file
+    return metrics_file
 
 def save_traffic_data(interface, data):
     """Save traffic history data to a JSON file."""
@@ -753,10 +778,9 @@ def main():
     else:
         print("Monitoring continuously until you press Ctrl+C.\n")
     
-    # Initialize performance metrics file
-    with open(METRICS_FILE, 'w') as f:
-        f.write("DoS Alarm System Performance Metrics\n")
-        f.write("====================================\n\n")
+    # Initialize performance metrics session
+    metrics_file = initialize_metrics_session()
+    print(f"Logging performance metrics to: {metrics_file}")
     
     # Start sniffing in a separate thread
     sniff_thread = threading.Thread(
