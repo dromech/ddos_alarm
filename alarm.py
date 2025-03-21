@@ -28,10 +28,10 @@ from datetime import datetime
 - Improve performance metric logging:
     - Log additional details such as CPU and memory usage during detection.
     - Record detailed timestamps for alerts. (done)
-    - Accurately log counts of false positives and false negatives.
-    - Refine metric reset logic for each time window.
+    - Accurately log counts of false positives and false negatives. (this system is ready)
+    - Refine metric reset logic for each time window. (done)
 
-- Upgrade alerting mechanisms:
+- Upgrade alerting mechanisms: (This whole section can maybe be added later)
     - Integrate email notifications (maybe using SMTP).
     - Implement SMS or other messaging service alerts.
     - Add rate-limiting to avoid alert flooding during prolonged attacks.
@@ -213,7 +213,7 @@ class AnomalyDetector:
     def __init__(self, interface):
         self.interface = interface
         self.consecutive_anomalies = 0
-        self.anomaly_threshold = 3  # Number of consecutive windows needed to trigger alert
+        self.anomaly_threshold = 3  # Number of consecutive windows needed to trigger alert (This can be changed by the user or could be updated dynamically for different times of the day)
         self.pending_anomaly = None  # Store details of pending anomaly
         self.in_anomaly_state = False  # Track if we're currently in an anomaly state
         # Load history from persistent storage
