@@ -11,7 +11,7 @@ Threshold-Based Detection:
 Raises alerts if the number of SYN or UDP packets within a given time window exceeds defined thresholds.
 
 Anomaly Detection:  
-Uses K-Means clustering to analyze traffic patterns and detect anomalies based on historical data.  
+Uses A multi-stage detection system with both volume-based checks and pattern-based anomaly detection.  
 * Auto-calibrating parameters based on network traffic patterns  
 * Training mode to establish baseline traffic before detection  
 * Consecutive anomaly tracking to reduce false positives  
@@ -86,9 +86,6 @@ Utilizes Scapy’s sniff function to capture IP packets on the selected network 
 
 Processing Packets:  
 Each packet is analyzed in process_packet(), where counters for SYN and UDP packets are incremented, alerts are printed when thresholds are exceeded, and data is stored for anomaly detection.
-
-Anomaly Detection:  
-The AnomalyDetector class employs K-Means clustering with consecutive window tracking to compare current traffic patterns against historical data.
 
 Interface Selection:  
 Functions get_friendly_names(), list_interfaces_with_names(), and select_interface() provide a user-friendly mechanism for choosing the correct network interface.
