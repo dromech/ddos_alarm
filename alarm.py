@@ -212,6 +212,10 @@ class AnomalyDetector:
     
     def __init__(self, interface):
         self.interface = interface
+        self.consecutive_anomalies = 0
+        self.anomaly_threshold = 3  # Number of consecutive windows needed to trigger alert
+        self.pending_anomaly = None  # Store details of pending anomaly
+        self.in_anomaly_state = False  # Track if we're currently in an anomaly state
         # Load history from persistent storage
         self.history = load_traffic_data(interface)
         print(f"Loaded {len(self.history)} historical traffic data points for {interface}")
@@ -270,8 +274,14 @@ class AnomalyDetector:
         # Set threshold based on distribution of distances (e.g., mean + 2*std for better sensitivity)
         mean_dist = np.mean(distances)
         std_dist = np.std(distances)
-        # More sensitive detection (2 std instead of 3)
-        self.distance_threshold = mean_dist + 2 * std_dist  
+        
+        # For more sensitive detection (use 2 std instead of 3)
+        # self.distance_threshold = mean_dist + 3 * std_dist
+
+        # self.distance_threshold = max(100, mean_dist + 3 * std_dist)
+
+        min_threshold = max(50, min(self.historical_max_syn, self.historical_max_udp) * 0.1)
+        self.distance_threshold = max(min_threshold, mean_dist + 3 * std_dist)
         
         print(f"Auto-calibrated parameters: n_clusters={self.n_clusters}, distance_threshold={self.distance_threshold:.2f}")
     
@@ -312,6 +322,19 @@ class AnomalyDetector:
         
         # Only add non-anomalous data to the history
         if not is_anomaly:
+            # Reset consecutive counter if this window is normal
+            if self.consecutive_anomalies > 0:
+                print(f"Resetting anomaly counter (was {self.consecutive_anomalies})")
+                self.consecutive_anomalies = 0
+                self.pending_anomaly = None
+            
+            # If we were in an anomaly state and now it's over
+            if self.in_anomaly_state:
+                self.in_anomaly_state = False
+                # Signal the end of an anomaly (for logging purposes)
+                return False, {"anomaly_ended": True}
+
+
             # Update historical maximums for non-anomalous traffic
             if syn_count > self.historical_max_syn:
                 self.historical_max_syn = syn_count
@@ -333,13 +356,39 @@ class AnomalyDetector:
                 # Update storage after trimming
                 save_traffic_data(self.interface, self.history)
         else:
-            print(f"Anomaly detected - NOT adding to baseline: SYN={syn_count}, UDP={udp_count}")
-        
+            self.consecutive_anomalies += 1
+            print(f"Potential anomaly detected ({self.consecutive_anomalies}/{self.anomaly_threshold})")
+            
+            # Store the first anomaly's details if we don't have pending info
+            if self.pending_anomaly is None:
+                self.pending_anomaly = {
+                    "first_seen": time.time(),
+                    "syn_count": syn_count,
+                    "udp_count": udp_count,
+                    "info": anomaly_info
+                }
+            
+            # Never add anomalous traffic to history, regardless of consecutive count
+            print(f"Potential anomaly detected - NOT adding to baseline: SYN={syn_count}, UDP={udp_count}")
+            
+            # Check if we've reached the threshold for alerting
+            if self.consecutive_anomalies >= self.anomaly_threshold and not self.in_anomaly_state:
+                self.in_anomaly_state = True
+                print(f"Anomaly confirmed after {self.consecutive_anomalies} consecutive windows")
+                return True, anomaly_info
+            elif self.consecutive_anomalies < self.anomaly_threshold:
+                # Not enough consecutive anomalies yet to trigger an alert
+                return False, None
+            else:
+                # We're in an ongoing anomaly state
+                print(f"Ongoing anomaly - window {self.consecutive_anomalies}")
+                return True, anomaly_info
+
         # Recalibrate periodically (every 20 points instead of 10)
         if len(self.history) % 20 == 0 and not is_anomaly:
             self.calibrate_parameters()
             
-        return is_anomaly, anomaly_info
+        return False, None
     
     def is_anomaly(self, syn_count, udp_count):
         """Check if the given counts represent an anomaly"""
@@ -356,7 +405,7 @@ class AnomalyDetector:
         print(f"Traffic ratio: {traffic_ratio:.2f}")
         
         # Use a more sensitive threshold for high traffic
-        if traffic_ratio > 1.4:  # 40% above historical instead of 50%
+        if traffic_ratio > 2.0:  # 100% above historical instead of 40%
             anomaly_info = {
                 "reason": "High traffic volume",
                 "details": f"Traffic {int(traffic_ratio*100-100)}% above historical maximum"
