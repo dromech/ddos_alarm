@@ -11,10 +11,15 @@ Threshold-Based Detection:
 Raises alerts if the number of SYN or UDP packets within a given time window exceeds defined thresholds.
 
 Anomaly Detection:  
-Uses K-Means clustering to analyze traffic patterns and detect anomalies based on historical data.
+Uses K-Means clustering to analyze traffic patterns and detect anomalies based on historical data.  
+* Auto-calibrating parameters based on network traffic patterns  
+* Training mode to establish baseline traffic before detection  
+* Consecutive anomaly tracking to reduce false positives  
+* 3-sigma rule for establishing reliable anomaly boundaries  
+* JSON-based persistent storage of traffic patterns across system restarts
 
 Performance Metrics Logging:  
-Logs metrics such as true positives, false positives, false negatives, and detection times into a performance metrics file (performance_metrics.txt).
+Logs metrics such into a performance metrics file (performance_metrics.txt).
 
 User-Friendly Interface Selection:  
 Displays available network interfaces with friendly names and allows the user to select one for monitoring.
@@ -25,36 +30,8 @@ Captures IP packets using Scapy’s sniff function and processes each packet to 
 Threading:  
 Runs packet sniffing in a separate thread to facilitate graceful shutdown using Ctrl+C.
 
-Planned Enhancements:  
 Modular Detection Switching:  
-
-Implement configuration options or command-line arguments to switch between detection methods.
 Encapsulate threshold-based detection and anomaly detection in separate modules to allow for controlled comparisons.
-Enhanced Anomaly Detection:  
-
-Further tune K-Means parameters for better performance.
-Explore additional models such as autoencoders.
-Expand feature extraction to include additional traffic characteristics (e.g., packet sizes, inter-arrival times).
-
-Improved Performance Metrics:  
-
-Log additional details such as CPU and memory usage, and more precise timestamps for each event.
-Refine logic to accurately capture false positives and false negatives within each monitoring window.
-
-Advanced Alerting Mechanisms:  
-
-Extend alerting beyond console output by integrating email notifications via SMTP and possibly SMS alerts.
-Implement rate-limiting to prevent alert flooding during prolonged attacks.
-
-DoS Attack Simulation Module:  
-
-Develop a module to simulate various DoS attacks (e.g., TCP SYN Flood, UDP Flood, Slowloris) for controlled testing of the detection methods.
-Allow configuration of simulation parameters to validate the system under different attack scenarios.
-
-Comprehensive Documentation & Reporting:  
-
-Update documentation with detailed installation instructions, usage guidelines, and configuration options.
-Prepare a final report that includes a comparative analysis of detection methods and performance metrics.
 
 Installation:  
 Clone the repository:  
@@ -71,7 +48,12 @@ bash
 Copy  
 python alarm.py  
 
-Select a Network Interface:  
+Usage  
+Run the script:  
+bash  
+python alarm.py
+
+Select a Network Interface: 
 Upon starting, the tool will list all available network interfaces with friendly names. Input the number corresponding to the interface you wish to monitor.
 
 Monitor Traffic:  
@@ -82,7 +64,7 @@ A high rate of UDP packets
 Anomalous traffic patterns based on historical data  
 
 Stop the Tool:  
-Use Ctrl+C to gracefully stop the tool. Upon shutdown, cumulative performance metrics are logged to performance_metrics.txt.
+Use Ctrl+C to gracefully stop the tool. Upon shutdown, performance metrics are logged to a timestamped metrics file.
 
 Configuration:  
 Adjust various parameters directly in the script:  
@@ -95,27 +77,8 @@ Time Window:
 WINDOW_SIZE: The duration (in seconds) of the monitoring window.
 
 Anomaly Detection:  
-ANOMALY_THRESHOLD: The ratio threshold used in the K-Means clustering anomaly detection.
-
-Performance Metrics File:  
-METRICS_FILE: The filename for logging performance metrics.  
-Performance Metrics  
-
-The system tracks and logs the following metrics in performance_metrics.txt:  
-
-True Positives:  
-Number of correctly detected DoS events.
-
-False Positives:  
-Number of alerts raised when no actual DoS event occurred.
-
-False Negatives:  
-Number of DoS events that were missed.
-
-Detection Times:  
-The time taken to detect each event.
-
-Metrics are logged at the end of each monitoring window.
+anomaly_threshold: Number of consecutive anomalous windows required to trigger an alert (default: 3)  
+distance_threshold: Auto-calculated based on traffic statistics with minimum threshold protection
 
 Code Overview:  
 Packet Sniffing:  
@@ -125,7 +88,7 @@ Processing Packets:
 Each packet is analyzed in process_packet(), where counters for SYN and UDP packets are incremented, alerts are printed when thresholds are exceeded, and data is stored for anomaly detection.
 
 Anomaly Detection:  
-The detect_anomaly() function employs K-Means clustering to compare current traffic patterns against historical data.
+The AnomalyDetector class employs K-Means clustering with consecutive window tracking to compare current traffic patterns against historical data.
 
 Interface Selection:  
 Functions get_friendly_names(), list_interfaces_with_names(), and select_interface() provide a user-friendly mechanism for choosing the correct network interface.
