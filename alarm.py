@@ -128,7 +128,7 @@ def log_attack(attack_type, start_time=None, end_time=None, sources=None, extra_
         f.write("----------------------------------------------------\n\n")
 
 # Function to initialize metrics file with session information
-def initialize_metrics_session():
+def initialize_metrics_session(detection_method):
     global current_metrics_file
     metrics_file = get_metrics_filename()
     
@@ -136,6 +136,7 @@ def initialize_metrics_session():
         f.write("DoS Alarm System Performance Metrics\n")
         f.write("====================================\n")
         f.write(f"Session Start: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Detection Method: {detection_method}\n")
         # Add system info
         f.write(f"System Information:\n")
         # We could add more system information here
@@ -875,7 +876,7 @@ def main():
         print("Monitoring continuously until you press Ctrl+C.\n")
     
     # Initialize performance metrics session
-    metrics_file = initialize_metrics_session()
+    metrics_file = initialize_metrics_session(detection_method)
     print(f"Logging performance metrics to: {metrics_file}")
     
     # Start sniffing in a separate thread
