@@ -52,6 +52,7 @@ THRESHOLD_SYN = 100  # Default fallback
 THRESHOLD_UDP = 200  # Default fallback
 WINDOW_SIZE = 10     # Default fallback (seconds)
 current_metrics_file = None  # Will be set by initialize_metrics_session
+window_count = 0
 
 stop_sniffing = False
 window_start_time = time.time()
@@ -183,6 +184,24 @@ def append_traffic_data(interface, syn_count, udp_count):
     data = load_traffic_data(interface)
     data.append([syn_count, udp_count])
     save_traffic_data(interface, data)
+
+def log_system_performance():
+    """Log process-specific performance metrics to the current session file"""
+    global current_metrics_file
+    # Get the current process
+    current_process = psutil.Process(os.getpid())
+    # Get CPU usage of just this process
+    process_cpu = current_process.cpu_percent(interval=0.1)
+    # Get memory info of just this process
+    process_memory = current_process.memory_info()
+    memory_usage_mb = process_memory.rss / (1024 * 1024)  # Convert bytes to MB
+    
+    with open(current_metrics_file, 'a') as f:
+        now_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        f.write(f"\n--- DoS Alarm Process Performance at {now_str} ---\n")
+        f.write(f"Process CPU Usage: {process_cpu}%\n")
+        f.write(f"Process Memory Usage: {memory_usage_mb:.2f} MB\n")
+        f.write("----------------------------------------------------\n\n")
 
 
 class ThresholdDetector:
@@ -325,6 +344,27 @@ class AnomalyDetector:
             # Reset consecutive counter if this window is normal
             if self.consecutive_anomalies > 0:
                 print(f"Resetting anomaly counter (was {self.consecutive_anomalies})")
+                
+                # If we had pending anomalies that didn't reach the threshold,
+                # add them to the history since they weren't true anomalies
+                if self.pending_anomaly is not None and self.consecutive_anomalies < self.anomaly_threshold:
+                    print(f"Adding {self.consecutive_anomalies} pending anomalies to history that didn't reach threshold")
+                    
+                    # Need to track all potential anomaly data points
+                    # First, add the one we stored explicitly
+                    if "syn_count" in self.pending_anomaly and "udp_count" in self.pending_anomaly:
+                        pending_data = [self.pending_anomaly["syn_count"], self.pending_anomaly["udp_count"]]
+                        self.history.append(pending_data)
+                        append_traffic_data(self.interface, pending_data[0], pending_data[1])
+                        print(f"Added first pending anomaly to history: SYN={pending_data[0]}, UDP={pending_data[1]}")
+                    
+                    # Now add the current window data (which would be the second potential anomaly)
+                    # Only do this if we had exactly 2 potential anomalies
+                    if self.consecutive_anomalies == 2:
+                        self.history.append([syn_count, udp_count])
+                        append_traffic_data(self.interface, syn_count, udp_count)
+                        print(f"Added second pending anomaly to history: SYN={syn_count}, UDP={udp_count}")
+                
                 self.consecutive_anomalies = 0
                 self.pending_anomaly = None
             
@@ -485,7 +525,7 @@ def select_interface():
 
 
 def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
-    global window_start_time, metrics_total, attack_state_syn, attack_state_udp, attack_state_anomaly, WINDOW_SIZE
+    global window_start_time, metrics_total, attack_state_syn, attack_state_udp, attack_state_anomaly, WINDOW_SIZE, window_count
     
     current_time = time.time()
     elapsed_time = current_time - window_start_time
@@ -498,6 +538,13 @@ def process_packet(packet, detection_method, thresh_detector, anomaly_detector):
         anomaly_detector.update_counts(packet)
 
     if elapsed_time > WINDOW_SIZE:
+        # Increment window count
+        window_count += 1
+        
+        # Log system performance every 10 windows
+        if window_count % 10 == 0:
+            log_system_performance()
+        
         detection_start = time.time()
         
         syn_count = thresh_detector.packet_counts.get('SYN', 0)
