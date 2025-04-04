@@ -850,9 +850,37 @@ def main():
             print(f"Found existing traffic data with {len(existing_data)} data points")
             reset_data = input("Would you like to reset the traffic baseline and start fresh? (y/n): ").strip().lower()
             if reset_data == 'y':
+                # Ask for the training duration
+                sample_duration = int(input("Enter training duration in seconds (default 60): ").strip() or 60)
+                print(f"Traffic baseline reset. Will collect {sample_duration} seconds of training data.")
+                
                 # Reset the traffic data
                 save_traffic_data(interface, [])
-                print("Traffic baseline reset. System will start in training mode.")
+                
+                # Collect baseline sample
+                sample_data = []
+                
+                def baseline_callback(pkt):
+                    nonlocal syn_count, udp_count
+                    if pkt.haslayer(TCP):
+                        tcp_layer = pkt.getlayer(TCP)
+                        if tcp_layer.flags == 'S':
+                            syn_count += 1
+                    if pkt.haslayer(UDP):
+                        udp_count += 1
+                
+                # Collect several windows of data
+                for i in range(int(sample_duration / WINDOW_SIZE)):
+                    syn_count, udp_count = 0, 0
+                    t0 = time.time()
+                    sniff(iface=interface, store=False, prn=baseline_callback,
+                        stop_filter=lambda x: (time.time() - t0) > WINDOW_SIZE)
+                    sample_data.append([syn_count, udp_count])
+                    print(f"Window {i + 1}: SYN={syn_count}, UDP={udp_count}")
+                
+                # Save the collected baseline
+                save_traffic_data(interface, sample_data)
+                print(f"Baseline traffic data collected and saved ({len(sample_data)} windows)")
 
     # 5) Ask user for duration (in seconds)
     time_limit_input = input("Enter duration to monitor in seconds (leave blank for continuous monitoring): ").strip()
